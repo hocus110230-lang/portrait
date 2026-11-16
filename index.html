@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#14141a" />
+  <title>Portrait Lab · 첫 번째 실습</title>
+  <style>
+    :root { color-scheme: dark; --bg:#14141a; --panel:#22222b; --line:#353540; --muted:#aaaab6; --accent:#ba9aff; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100dvh; background:var(--bg); color:#f8f6fc; font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",system-ui,sans-serif; }
+    .app { width:100%; max-width:680px; min-height:100dvh; display:flex; flex-direction:column; margin:auto; }
+    .top { padding:16px 17px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--line); }
+    .brand { font-size:17px; font-weight:750; letter-spacing:-.4px; }
+    .pill { color:#d7c4ff; background:#322945; border:1px solid #514270; border-radius:20px; font-size:11px; padding:5px 9px; }
+    .stage { position:relative; width:100%; height:min(61dvh,590px); min-height:290px; background:radial-gradient(ellipse at center,#252530,#101015 75%); overflow:hidden; touch-action:none; user-select:none; }
+    .stage::before { content:""; position:absolute; inset:0; background-image:linear-gradient(45deg,transparent 49.5%,rgba(255,255,255,.024) 50%,transparent 50.5%); background-size:28px 28px; pointer-events:none; }
+    .canvas-shell { position:absolute; left:50%; top:50%; transform-origin:center center; box-shadow:0 9px 38px #0005; display:none; }
+    canvas { display:block; width:100%; height:100%; }
+    .empty { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:13px; padding:36px; text-align:center; pointer-events:none; }
+    .empty-icon { width:58px; height:58px; border:1px solid #615577; background:#3a324c; border-radius:17px; display:grid; place-items:center; font-size:28px; }
+    .empty strong { font-size:17px; }
+    .empty p { color:var(--muted); font-size:13px; line-height:1.6; max-width:270px; margin:0; }
+    .toolbox { padding:17px; flex:1; display:flex; flex-direction:column; gap:14px; }
+    .bar { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .label { font-size:14px; font-weight:650; }
+    .muted { font-size:12px; color:var(--muted); }
+    .controls { display:flex; gap:9px; }
+    button, .file-button { appearance:none; cursor:pointer; border-radius:12px; border:1px solid var(--line); background:#2b2b36; padding:12px 14px; font:600 13px inherit; color:inherit; text-align:center; white-space:nowrap; }
+    button:disabled { opacity:.35; cursor:not-allowed; }
+    .file-button { display:inline-flex; justify-content:center; align-items:center; flex:1; font-size:14px; font-weight:650; border-color:#a282f4; background:linear-gradient(115deg,#9f80eb,#7355c8); color:white; }
+    .controls button { min-width:72px; font-size:13px; }
+    input[type=file] { position:absolute; width:1px; height:1px; opacity:0; }
+    input[type=range] { width:100%; height:28px; accent-color:var(--accent); }
+    .notes { line-height:1.6; background:#1b1b23; border:1px solid #33333e; border-radius:12px; padding:11px 12px; font-size:12px; color:#c6c4d0; }
+    .status { font-size:12px; color:#d8cafb; min-height:18px; }
+    .footer { color:#82808f; font-size:11px; text-align:center; padding-bottom:calc(12px + env(safe-area-inset-bottom)); }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="top">
+      <div class="brand">Portrait Lab</div>
+      <span class="pill">실습 01 · 무료</span>
+    </header>
+    <section class="stage" id="stage" aria-label="사진 편집 영역">
+      <div class="empty" id="empty">
+        <div class="empty-icon">✦</div>
+        <strong>인물 사진을 불러오세요</strong>
+        <p>사진을 확대하고 피부에서 보정하고 싶은 위치를 직접 선택할 수 있어요.</p>
+      </div>
+      <div class="canvas-shell" id="shell"><canvas id="canvas"></canvas></div>
+    </section>
+    <section class="toolbox">
+      <div class="controls">
+        <label class="file-button" for="photoInput">＋ 사진 선택하기</label>
+        <input id="photoInput" type="file" accept="image/*" aria-label="사진 파일 선택" />
+        <button id="undo" disabled>↶ 취소</button>
+        <button id="reset" disabled>초기화</button>
+      </div>
+      <div class="bar"><span class="label">보정 위치 선택 브러시</span><span class="muted" id="sizeLabel">18px</span></div>
+      <input type="range" id="brushSize" min="6" max="42" value="18" aria-label="브러시 크기" />
+      <div class="bar"><span class="label">선택한 위치</span><span class="muted" id="count">0개</span></div>
+      <div class="notes">사진을 한 번 터치하면 보정할 위치에 표시가 생깁니다. 두 손가락으로 확대·축소하고 한 손가락으로 드래그해 이동할 수 있습니다. <strong>아직 사진 자체를 보정하지 않는 첫 실습입니다.</strong></div>
+      <div class="status" id="status" role="status">시작하려면 사진을 선택하세요.</div>
+    </section>
+    <footer class="footer">사진은 이 기기에서만 처리됩니다 · 외부 서버에 업로드하지 않습니다</footer>
+  </main>
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const stage = $('stage'), shell = $('shell'), canvas = $('canvas');
+  const ctx = canvas.getContext('2d');
+  const points = [];
+  const pointers = new Map();
+  let photo = null, zoom = 1, panX = 0, panY = 0;
+  let initialPinch = null, startPoint = null, moved = false;
+  let objectUrl = null;
+
+  function updateUi() {
+    $('count').textContent = `${points.length}개`;
+    $('undo').disabled = points.length === 0;
+    $('reset').disabled = !photo;
+  }
+  function draw() {
+    if (!photo) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(photo, 0, 0, canvas.width, canvas.height);
+    points.forEach(p => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(177, 255, 220, .20)';
+      ctx.fill();
+      ctx.lineWidth = Math.max(2, canvas.width / 650);
+      ctx.strokeStyle = '#c0ffe6';
+      ctx.stroke();
+    });
+  }
+  function applyTransform() {
+    shell.style.transform = `translate(-50%, -50%) translate(${panX}px, ${panY}px) scale(${zoom})`;
+  }
+  function fitCanvas() {
+    if (!photo) return;
+    const scale = Math.min(stage.clientWidth / canvas.width, stage.clientHeight / canvas.height);
+    shell.style.width = `${canvas.width * scale}px`;
+    shell.style.height = `${canvas.height * scale}px`;
+    applyTransform();
+  }
+  $('photoInput').addEventListener('change', ev => {
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { $('status').textContent = '이미지 파일을 선택해 주세요.'; return; }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = url;
+      photo = img;
+      const f = Math.min(1, 2200 / Math.max(img.naturalWidth, img.naturalHeight));
+      canvas.width = Math.round(img.naturalWidth * f);
+      canvas.height = Math.round(img.naturalHeight * f);
+      points.length = 0; zoom = 1; panX = 0; panY = 0;
+      shell.style.display = 'block';
+      $('empty').style.display = 'none';
+      fitCanvas(); draw(); updateUi();
+      $('status').textContent = '사진을 터치해 보정할 위치를 표시하세요.';
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); $('status').textContent = '사진을 열 수 없습니다. JPG 또는 PNG로 다시 시도해 주세요.'; };
+    img.src = url;
+    ev.target.value = '';
+  });
+  function distance(a,b) { return Math.hypot(a.x-b.x, a.y-b.y); }
+  function center(a,b) { return {x:(a.x+b.x)/2,y:(a.y+b.y)/2}; }
+  stage.addEventListener('pointerdown', ev => {
+    if (!photo) return;
+    ev.preventDefault();
+    stage.setPointerCapture(ev.pointerId);
+    pointers.set(ev.pointerId, {x:ev.clientX,y:ev.clientY});
+    moved = false;
+    if (pointers.size === 1) { startPoint = {x:ev.clientX, y:ev.clientY, panX, panY}; initialPinch = null; }
+    else if (pointers.size === 2) {
+      const [a,b] = [...pointers.values()];
+      initialPinch = {distance:Math.max(distance(a,b),1), zoom, panX, panY, mid:center(a,b)};
+      moved = true;
+    }
+  });
+  stage.addEventListener('pointermove', ev => {
+    if (!pointers.has(ev.pointerId)) return;
+    pointers.set(ev.pointerId, {x:ev.clientX,y:ev.clientY});
+    if (pointers.size === 2 && initialPinch) {
+      const [a,b] = [...pointers.values()];
+      const mid = center(a,b);
+      zoom = Math.max(1, Math.min(6, initialPinch.zoom * distance(a,b) / initialPinch.distance));
+      panX = initialPinch.panX + (mid.x - initialPinch.mid.x);
+      panY = initialPinch.panY + (mid.y - initialPinch.mid.y);
+      applyTransform(); moved = true;
+    } else if (pointers.size === 1 && startPoint) {
+      const dx=ev.clientX-startPoint.x, dy=ev.clientY-startPoint.y;
+      if (Math.hypot(dx,dy) > 7 || moved) {
+        moved = true; panX = startPoint.panX + dx; panY = startPoint.panY + dy; applyTransform();
+      }
+    }
+  });
+  function release(ev) {
+    if (!pointers.has(ev.pointerId)) return;
+    const wasTap = pointers.size === 1 && !moved && startPoint && distance({x:ev.clientX,y:ev.clientY},startPoint) < 8;
+    pointers.delete(ev.pointerId);
+    if (wasTap && photo) {
+      const rect=shell.getBoundingClientRect();
+      const x=(ev.clientX-rect.left)/rect.width*canvas.width;
+      const y=(ev.clientY-rect.top)/rect.height*canvas.height;
+      if (x>=0 && y>=0 && x<=canvas.width && y<=canvas.height) {
+        const radius=Number($('brushSize').value)/rect.width * canvas.width;
+        points.push({x,y,radius}); draw(); updateUi();
+        $('status').textContent = `${points.length}개의 보정 위치를 선택했어요.`;
+      }
+    }
+    if (pointers.size === 1) {
+      const p=[...pointers.values()][0];
+      startPoint={x:p.x,y:p.y,panX,panY};
+      moved=true;
+    }
+    if (pointers.size < 2) initialPinch=null;
+    if (!pointers.size) {startPoint=null; moved=false;}
+  }
+  stage.addEventListener('pointerup', release);
+  stage.addEventListener('pointercancel', release);
+  $('brushSize').addEventListener('input', ev => { $('sizeLabel').textContent = `${ev.target.value}px`; });
+  $('undo').addEventListener('click', () => { if(points.length) {points.pop();draw();updateUi();} });
+  $('reset').addEventListener('click', () => { points.length=0;zoom=1;panX=0;panY=0;applyTransform();draw();updateUi();$('status').textContent='보정 위치 표시를 초기화했습니다.'; });
+  window.addEventListener('resize', fitCanvas);
+})();
+</script>
+</body>
+</html>
